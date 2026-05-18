@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/lyrics.dart';
 import '../providers/music_providers.dart';
 
 class DangPhatScreen extends ConsumerWidget {
@@ -49,6 +50,13 @@ class DangPhatScreen extends ConsumerWidget {
     final trackRepository = ref.watch(trackRepositoryProvider);
     final coverUrl = trackRepository.getCoverUrl(nowPlaying);
     final palette = nowPlaying.palette;
+
+    final parsedLyrics = parseLyrics(nowPlaying.lyrics);
+    final currentLyric = getCurrentLyricLine(
+      parsedLyrics,
+      playerState.currentTime,
+    );
+
     final errorMessage = playerState.errorMessage;
 
     return Stack(
@@ -133,10 +141,12 @@ class DangPhatScreen extends ConsumerWidget {
                               isPlaying: playerState.isPlaying,
                               volume: playerState.volume,
                               isMuted: playerState.isMuted,
+                              currentLyric: currentLyric?.text,
+                              errorMessage: errorMessage,
                               onProgressChanged: controller.setProgress,
-                              onTogglePlay: controller.togglePlayPause,
-                              onPrevious: controller.playPrevious,
-                              onNext: controller.playNext,
+                              onTogglePlay: () => controller.togglePlayPause(),
+                              onPrevious: () => controller.playPrevious(),
+                              onNext: () => controller.playNext(),
                               onVolumeChanged: controller.setVolume,
                               onMutedChanged: controller.setMuted,
                             ),
@@ -165,10 +175,12 @@ class DangPhatScreen extends ConsumerWidget {
                           isPlaying: playerState.isPlaying,
                           volume: playerState.volume,
                           isMuted: playerState.isMuted,
+                          currentLyric: currentLyric?.text,
+                          errorMessage: errorMessage,
                           onProgressChanged: controller.setProgress,
-                          onTogglePlay: controller.togglePlayPause,
-                          onPrevious: controller.playPrevious,
-                          onNext: controller.playNext,
+                          onTogglePlay: () => controller.togglePlayPause(),
+                          onPrevious: () => controller.playPrevious(),
+                          onNext: () => controller.playNext(),
                           onVolumeChanged: controller.setVolume,
                           onMutedChanged: controller.setMuted,
                         ),
@@ -324,6 +336,8 @@ class _PlayerInfoAndControls extends StatelessWidget {
     required this.isPlaying,
     required this.volume,
     required this.isMuted,
+    required this.currentLyric,
+    required this.errorMessage,
     required this.onProgressChanged,
     required this.onTogglePlay,
     required this.onPrevious,
@@ -342,6 +356,8 @@ class _PlayerInfoAndControls extends StatelessWidget {
   final bool isPlaying;
   final double volume;
   final bool isMuted;
+  final String? currentLyric;
+  final String? errorMessage;
 
   final ValueChanged<double> onProgressChanged;
   final VoidCallback onTogglePlay;
@@ -414,7 +430,7 @@ class _PlayerInfoAndControls extends StatelessWidget {
           child: Slider(
             min: 0,
             max: 100,
-            value: progress.clamp(0, 100),
+            value: progress.clamp(0, 100).toDouble(),
             onChanged: onProgressChanged,
           ),
         ),
@@ -442,6 +458,58 @@ class _PlayerInfoAndControls extends StatelessWidget {
             ],
           ),
         ),
+        if (currentLyric != null && currentLyric!.trim().isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: palette.primary.withOpacity(0.18),
+              border: Border.all(color: palette.primary.withOpacity(0.35)),
+              boxShadow: [
+                BoxShadow(
+                  color: palette.primary.withOpacity(0.10),
+                  blurRadius: 28,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Text(
+              currentLyric!,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.35,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+        if (errorMessage != null && errorMessage!.trim().isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.redAccent.withOpacity(0.25)),
+            ),
+            child: Text(
+              errorMessage!,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 13,
+                height: 1.4,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -451,7 +519,7 @@ class _PlayerInfoAndControls extends StatelessWidget {
               size: 52,
               onPressed: onPrevious,
             ),
-            const SizedBox(width: 18),
+            const SizedBox(width: 14),
             GestureDetector(
               onTap: onTogglePlay,
               child: Container(
@@ -470,16 +538,26 @@ class _PlayerInfoAndControls extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: isPlaying
-                    ? const Icon(Icons.pause, color: Colors.black, size: 38)
-                    : const Icon(
-                        Icons.play_arrow,
-                        color: Colors.black,
-                        size: 38,
-                      ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  transitionBuilder: (child, animation) {
+                    return ScaleTransition(
+                      scale: animation,
+                      child: FadeTransition(opacity: animation, child: child),
+                    );
+                  },
+                  child: Icon(
+                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    key: ValueKey<String>(
+                      isPlaying ? 'dangphat-pause-icon' : 'dangphat-play-icon',
+                    ),
+                    color: Colors.black,
+                    size: 42,
+                  ),
+                ),
               ),
             ),
-            const SizedBox(width: 18),
+            const SizedBox(width: 14),
             _CircleButton(icon: Icons.skip_next, size: 52, onPressed: onNext),
           ],
         ),
@@ -514,7 +592,7 @@ class _PlayerInfoAndControls extends StatelessWidget {
                   child: Slider(
                     min: 0,
                     max: 100,
-                    value: isMuted ? 0 : volume.clamp(0, 100),
+                    value: isMuted ? 0.0 : volume.clamp(0, 100).toDouble(),
                     onChanged: onVolumeChanged,
                   ),
                 ),

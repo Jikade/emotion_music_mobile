@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:just_audio/just_audio.dart' as ja;
 
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/token_storage.dart';
@@ -40,6 +40,7 @@ class LikedTracksController extends Notifier<Set<int>> {
   Set<int> build() {
     _repository = ref.watch(likeRepositoryProvider);
     Future.microtask(load);
+
     return <int>{};
   }
 
@@ -102,7 +103,7 @@ class PlayerState {
     final value =
         currentTime.inMilliseconds / totalDuration.inMilliseconds * 100;
 
-    return value.clamp(0, 100);
+    return value.clamp(0, 100).toDouble();
   }
 
   String get currentEmotion {
@@ -142,48 +143,74 @@ final musicPlayerProvider =
     );
 
 class MusicPlayerController extends Notifier<PlayerState> {
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final ja.AudioPlayer _audioPlayer = ja.AudioPlayer();
 
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration?>? _durationSub;
-  StreamSubscription<bool>? _playingSub;
-  StreamSubscription<PlayerState>? _processingSub;
+  StreamSubscription<ja.PlayerState>? _playerStateSub;
 
   int _playRequestId = 0;
+  int _toggleRequestId = 0;
+
+  bool _isPreparingSource = false;
 
   @override
   PlayerState build() {
-    _positionSub = _audioPlayer.positionStream.listen((position) {
-      state = state.copyWith(currentTime: position);
-    });
-
-    _durationSub = _audioPlayer.durationStream.listen((duration) {
-      state = state.copyWith(
-        totalDuration: duration ?? state.nowPlaying?.duration ?? Duration.zero,
-      );
-    });
-
-    _playingSub = _audioPlayer.playingStream.listen((playing) {
-      state = state.copyWith(isPlaying: playing);
-    });
+    Future.microtask(_attachListeners);
 
     ref.onDispose(() {
       _positionSub?.cancel();
       _durationSub?.cancel();
-      _playingSub?.cancel();
-      _processingSub?.cancel();
+      _playerStateSub?.cancel();
       _audioPlayer.dispose();
     });
 
     return const PlayerState();
   }
 
+  void _attachListeners() {
+    _positionSub ??= _audioPlayer.positionStream.listen((position) {
+      state = state.copyWith(currentTime: position);
+    });
+
+    _durationSub ??= _audioPlayer.durationStream.listen((duration) {
+      state = state.copyWith(
+        totalDuration: duration ?? state.nowPlaying?.duration ?? Duration.zero,
+      );
+    });
+
+    _playerStateSub ??= _audioPlayer.playerStateStream.listen((audioState) {
+      final processingState = audioState.processingState;
+
+      if (processingState == ja.ProcessingState.completed) {
+        _isPreparingSource = false;
+
+        state = state.copyWith(
+          isPlaying: false,
+          isLoading: false,
+          currentTime: state.totalDuration,
+        );
+        return;
+      }
+
+      // Không set isPlaying bằng audioState.playing ở đây.
+      // isPlaying chỉ được đổi bởi playTrack(), togglePlayPause(), stopPlayback().
+      state = state.copyWith(isLoading: _isPreparingSource);
+    });
+  }
+
   Future<void> playTrack(Track track, {required List<Track> queue}) async {
     final requestId = ++_playRequestId;
+    _toggleRequestId++;
+
+    _isPreparingSource = true;
+
     final repository = ref.read(trackRepositoryProvider);
     final audioUrl = repository.getAudioUrl(track);
 
     if (audioUrl.isEmpty) {
+      _isPreparingSource = false;
+
       state = state.copyWith(
         nowPlaying: track,
         queue: queue,
@@ -207,41 +234,63 @@ class MusicPlayerController extends Notifier<PlayerState> {
     );
 
     try {
-      // Quan trọng: dừng hẳn source cũ trước khi set source mới.
       await _audioPlayer.stop();
 
-      // Nếu user bấm bài khác rất nhanh, bỏ request cũ.
       if (requestId != _playRequestId) return;
 
-      await _audioPlayer.seek(Duration.zero);
-
-      if (requestId != _playRequestId) return;
-
-      // Set URL mới. Dùng Uri để tránh lỗi URL có dấu cách/ký tự tiếng Việt.
       await _audioPlayer.setAudioSource(
-        AudioSource.uri(Uri.parse(audioUrl)),
+        ja.AudioSource.uri(Uri.parse(audioUrl)),
         preload: true,
       );
 
       if (requestId != _playRequestId) return;
 
-      await _audioPlayer.setVolume(state.isMuted ? 0 : state.volume / 100);
+      final loadedDuration = _audioPlayer.duration;
 
-      if (requestId != _playRequestId) return;
-
-      await _audioPlayer.play();
-
-      if (requestId != _playRequestId) return;
+      _isPreparingSource = false;
 
       state = state.copyWith(
         nowPlaying: track,
         queue: queue,
+        currentTime: Duration.zero,
+        totalDuration: loadedDuration ?? track.duration,
+        isLoading: false,
+        clearError: true,
+      );
+
+      await _audioPlayer.setVolume(state.isMuted ? 0 : state.volume / 100);
+
+      if (requestId != _playRequestId) return;
+
+      // Đổi UI ngay sang Pause ||.
+      // Nhưng chỉ đổi nếu playTrack này chưa bị togglePlayPause() hủy.
+      state = state.copyWith(
+        isPlaying: true,
+        isLoading: false,
+        clearError: true,
+      );
+
+      await _audioPlayer.play();
+
+      // Nếu user bấm pause trong lúc await play(),
+      // togglePlayPause() đã tăng _playRequestId.
+      // Khi đó playTrack cũ không được set UI về Pause || nữa.
+      if (requestId != _playRequestId) {
+        await _safePause();
+        return;
+      }
+
+      _isPreparingSource = false;
+
+      state = state.copyWith(
         isPlaying: true,
         isLoading: false,
         clearError: true,
       );
     } catch (error) {
       if (requestId != _playRequestId) return;
+
+      _isPreparingSource = false;
 
       await _audioPlayer.stop();
 
@@ -258,12 +307,94 @@ class MusicPlayerController extends Notifier<PlayerState> {
   }
 
   Future<void> togglePlayPause() async {
-    if (state.nowPlaying == null || state.isLoading) return;
+    if (state.nowPlaying == null) return;
 
-    if (state.isPlaying) {
+    final shouldPlay = !state.isPlaying;
+
+    // QUAN TRỌNG:
+    // Hủy mọi playTrack() đang chạy dở.
+    // Nếu không, playTrack() có thể chạy tiếp sau lần bấm pause đầu tiên
+    // rồi set lại isPlaying: true, làm icon quay về dấu ||.
+    ++_playRequestId;
+
+    final toggleId = ++_toggleRequestId;
+
+    _isPreparingSource = false;
+
+    // Đổi icon ngay lập tức, không chờ just_audio.
+    state = state.copyWith(
+      isPlaying: shouldPlay,
+      isLoading: false,
+      clearError: true,
+    );
+
+    try {
+      if (shouldPlay) {
+        if (_audioPlayer.audioSource == null) {
+          final track = state.nowPlaying;
+          if (track == null) return;
+
+          await playTrack(track, queue: state.queue);
+          return;
+        }
+
+        await _audioPlayer.play();
+
+        if (toggleId != _toggleRequestId) return;
+
+        state = state.copyWith(
+          isPlaying: true,
+          isLoading: false,
+          clearError: true,
+        );
+      } else {
+        await _audioPlayer.pause();
+
+        if (toggleId != _toggleRequestId) return;
+
+        state = state.copyWith(
+          isPlaying: false,
+          isLoading: false,
+          clearError: true,
+        );
+      }
+    } catch (error) {
+      if (toggleId != _toggleRequestId) return;
+
+      state = state.copyWith(
+        isPlaying: false,
+        isLoading: false,
+        errorMessage: 'Không thể đổi trạng thái phát nhạc: $error',
+      );
+    }
+  }
+
+  Future<void> stopPlayback() async {
+    ++_playRequestId;
+    ++_toggleRequestId;
+
+    _isPreparingSource = false;
+
+    state = state.copyWith(
+      isPlaying: false,
+      isLoading: false,
+      clearError: true,
+    );
+
+    try {
       await _audioPlayer.pause();
-    } else {
-      await _audioPlayer.play();
+
+      state = state.copyWith(
+        isPlaying: false,
+        isLoading: false,
+        clearError: true,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        isPlaying: false,
+        isLoading: false,
+        errorMessage: 'Không thể tạm dừng bài hát: $error',
+      );
     }
   }
 
@@ -292,32 +423,39 @@ class MusicPlayerController extends Notifier<PlayerState> {
   }
 
   Future<void> setProgress(double value) async {
-    if (state.totalDuration.inMilliseconds <= 0) return;
+    final duration = _audioPlayer.duration ?? state.totalDuration;
+
+    if (duration.inMilliseconds <= 0) return;
 
     final percent = value.clamp(0, 100) / 100;
-    final targetMilliseconds = (state.totalDuration.inMilliseconds * percent)
-        .round();
+    final targetMilliseconds = (duration.inMilliseconds * percent).round();
 
     await _audioPlayer.seek(Duration(milliseconds: targetMilliseconds));
+
+    state = state.copyWith(
+      currentTime: Duration(milliseconds: targetMilliseconds),
+      totalDuration: duration,
+    );
   }
 
   Future<void> setVolume(double value) async {
     final safeVolume = value.clamp(0, 100).toDouble();
-
-    final shouldMute = safeVolume == 0 ? true : state.isMuted;
+    final shouldMute = safeVolume <= 0;
 
     state = state.copyWith(volume: safeVolume, isMuted: shouldMute);
 
-    if (!state.isMuted) {
-      await _audioPlayer.setVolume(safeVolume / 100);
-    } else {
-      await _audioPlayer.setVolume(0);
-    }
+    await _audioPlayer.setVolume(shouldMute ? 0 : safeVolume / 100);
   }
 
   Future<void> setMuted(bool value) async {
     state = state.copyWith(isMuted: value);
 
     await _audioPlayer.setVolume(value ? 0 : state.volume / 100);
+  }
+
+  Future<void> _safePause() async {
+    try {
+      await _audioPlayer.pause();
+    } catch (_) {}
   }
 }

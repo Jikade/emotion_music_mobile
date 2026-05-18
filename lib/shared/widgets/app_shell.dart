@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_providers.dart';
+import 'bottom_mini_player.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child, required this.currentIndex});
@@ -58,30 +59,36 @@ class AppShell extends ConsumerWidget {
             ),
         ],
       ),
-      body: SafeArea(child: child),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: (index) => _goToPage(context, index),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Bảng điều khiển',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.favorite_border),
-            selectedIcon: Icon(Icons.favorite),
-            label: 'Thư viện',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.album_outlined),
-            selectedIcon: Icon(Icons.album),
-            label: 'Đang phát',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.mood_outlined),
-            selectedIcon: Icon(Icons.mood),
-            label: 'Cảm xúc',
+      body: SafeArea(bottom: false, child: child),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const BottomMiniPlayer(),
+          NavigationBar(
+            selectedIndex: currentIndex,
+            onDestinationSelected: (index) => _goToPage(context, index),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.dashboard_outlined),
+                selectedIcon: Icon(Icons.dashboard),
+                label: 'Bảng điều khiển',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.favorite_border),
+                selectedIcon: Icon(Icons.favorite),
+                label: 'Thư viện',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.album_outlined),
+                selectedIcon: Icon(Icons.album),
+                label: 'Đang phát',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.mood_outlined),
+                selectedIcon: Icon(Icons.mood),
+                label: 'Cảm xúc',
+              ),
+            ],
           ),
         ],
       ),
