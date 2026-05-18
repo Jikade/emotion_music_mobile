@@ -1,37 +1,106 @@
-import 'dart:math';
+import 'dart:math' as math;
+
+import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
-import '../../../core/storage/token_storage.dart';
 import '../../music/models/track.dart';
 
-typedef EmotionProbabilities = Map<String, double>;
+enum NlpEmotion { happy, sad, angry, relaxed }
 
-class NlpEmotion {
-  static const happy = 'happy';
-  static const sad = 'sad';
-  static const angry = 'angry';
-  static const relaxed = 'relaxed';
+extension NlpEmotionX on NlpEmotion {
+  String get key {
+    switch (this) {
+      case NlpEmotion.happy:
+        return 'happy';
+      case NlpEmotion.sad:
+        return 'sad';
+      case NlpEmotion.angry:
+        return 'angry';
+      case NlpEmotion.relaxed:
+        return 'relaxed';
+    }
+  }
 
-  static const values = [happy, sad, angry, relaxed];
+  String get labelVi {
+    switch (this) {
+      case NlpEmotion.happy:
+        return 'Vui vẻ';
+      case NlpEmotion.sad:
+        return 'Buồn';
+      case NlpEmotion.angry:
+        return 'Tức giận';
+      case NlpEmotion.relaxed:
+        return 'Thư giãn';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case NlpEmotion.happy:
+        return 'Tâm trạng tích cực, vui vẻ, nhiều năng lượng.';
+      case NlpEmotion.sad:
+        return 'Có sắc thái buồn, cô đơn hoặc mệt mỏi.';
+      case NlpEmotion.angry:
+        return 'Có cảm giác bực bội, căng thẳng hoặc khó chịu.';
+      case NlpEmotion.relaxed:
+        return 'Cần sự bình yên, thư giãn hoặc chữa lành.';
+    }
+  }
 }
 
 class RecommendedTrack {
   final Track track;
   final double recommendationScore;
-  final String? matchedMood;
+  final String moodText;
 
   const RecommendedTrack({
     required this.track,
     required this.recommendationScore,
-    this.matchedMood,
+    required this.moodText,
   });
+
+  factory RecommendedTrack.fromJson(
+    Map<String, dynamic> json, {
+    required int index,
+    required NlpEmotion fallbackEmotion,
+  }) {
+    final track = Track.fromJson(json);
+
+    final rawScore =
+        json['recommendation_score'] ??
+        json['score'] ??
+        json['confidence'] ??
+        (92 - index * 4);
+
+    final score = _toDouble(rawScore).clamp(0, 100).toDouble();
+
+    final moodText = json['mood']?.toString().trim().isNotEmpty == true
+        ? json['mood'].toString()
+        : json['emotion']?.toString().trim().isNotEmpty == true
+        ? json['emotion'].toString()
+        : fallbackEmotion.labelVi;
+
+    return RecommendedTrack(
+      track: track,
+      recommendationScore: score,
+      moodText: moodText,
+    );
+  }
+
+  static double _toDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
 }
 
 class EmotionDetectResult {
-  final String emotion;
+  final NlpEmotion emotion;
   final double confidence;
   final int confidencePercent;
-  final EmotionProbabilities probabilities;
+  final Map<NlpEmotion, double> probabilities;
   final List<RecommendedTrack> recommendedSongs;
   final RecommendedTrack? autoPlaySong;
   final String? rationale;
@@ -47,352 +116,148 @@ class EmotionDetectResult {
   });
 }
 
-class LocalEmotionResult {
-  final String? emotion;
+class _BackendEmotionResult {
+  final NlpEmotion emotion;
   final double confidence;
-  final EmotionProbabilities scores;
-  final EmotionProbabilities probabilities;
-  final Map<String, List<String>> matchedKeywords;
+  final Map<NlpEmotion, double>? probabilities;
+  final double? valence;
+  final double? arousal;
 
-  const LocalEmotionResult({
+  const _BackendEmotionResult({
     required this.emotion,
     required this.confidence,
-    required this.scores,
+    this.probabilities,
+    this.valence,
+    this.arousal,
+  });
+}
+
+class _LocalEmotionResult {
+  final NlpEmotion emotion;
+  final double confidence;
+  final Map<NlpEmotion, double> probabilities;
+  final List<String> matchedKeywords;
+
+  const _LocalEmotionResult({
+    required this.emotion,
+    required this.confidence,
     required this.probabilities,
     required this.matchedKeywords,
   });
 }
 
-class KeywordRule {
-  final String keyword;
-  final double weight;
-
-  const KeywordRule(this.keyword, this.weight);
-}
-
 class EmotionRepository {
-  EmotionRepository(this._apiClient, this._tokenStorage);
+  EmotionRepository(this._apiClient);
 
   final ApiClient _apiClient;
-  final TokenStorage _tokenStorage;
-
-  static const labels = {
-    NlpEmotion.happy: {'vi': 'Vui vẻ', 'en': 'Happy'},
-    NlpEmotion.sad: {'vi': 'Buồn / cô đơn', 'en': 'Sad'},
-    NlpEmotion.angry: {'vi': 'Tức giận', 'en': 'Angry'},
-    NlpEmotion.relaxed: {'vi': 'Thư giãn', 'en': 'Relaxed'},
-  };
-
-  static const moodAliases = {
-    NlpEmotion.happy: [
-      'happy',
-      'joy',
-      'enjoyment',
-      'positive',
-      'vui',
-      'vui vẻ',
-      'hạnh phúc',
-      'yêu đời',
-      'phấn khích',
-      'tích cực',
-      'green',
-      'energetic',
-    ],
-    NlpEmotion.sad: [
-      'sad',
-      'sadness',
-      'negative',
-      'lonely',
-      'buon',
-      'buồn',
-      'buồn chán',
-      'chán',
-      'cô đơn',
-      'đau lòng',
-      'thất vọng',
-      'khóc',
-      'blue',
-      'nostalgic',
-    ],
-    NlpEmotion.angry: [
-      'angry',
-      'anger',
-      'disgust',
-      'fear',
-      'stressed',
-      'stress',
-      'tức',
-      'giận',
-      'bực',
-      'khó chịu',
-      'cáu',
-      'căng thẳng',
-      'tức giận',
-      'red',
-    ],
-    NlpEmotion.relaxed: [
-      'relaxed',
-      'relax',
-      'calm',
-      'chill',
-      'healing',
-      'sleep',
-      'thư giãn',
-      'bình yên',
-      'nhẹ nhàng',
-      'êm dịu',
-      'an yên',
-      'cyan',
-    ],
-  };
-
-  static const localKeywords = {
-    NlpEmotion.happy: [
-      KeywordRule('vui vẻ', 2.2),
-      KeywordRule('hạnh phúc', 2.4),
-      KeywordRule('tuyệt vời', 2.0),
-      KeywordRule('yêu đời', 1.8),
-      KeywordRule('phấn khích', 1.8),
-      KeywordRule('hào hứng', 1.8),
-      KeywordRule('tích cực', 1.5),
-      KeywordRule('vui', 1.2),
-      KeywordRule('tuyệt', 1.2),
-      KeywordRule('cười', 1.1),
-      KeywordRule('happy', 1.5),
-      KeywordRule('joy', 1.5),
-      KeywordRule('joyful', 1.6),
-      KeywordRule('excited', 1.5),
-      KeywordRule('positive', 1.2),
-    ],
-    NlpEmotion.sad: [
-      KeywordRule('buồn chán', 2.4),
-      KeywordRule('cô đơn', 2.3),
-      KeywordRule('đau lòng', 2.0),
-      KeywordRule('thất vọng', 1.8),
-      KeywordRule('mệt mỏi', 1.4),
-      KeywordRule('chán nản', 1.8),
-      KeywordRule('tủi thân', 1.8),
-      KeywordRule('trống rỗng', 1.7),
-      KeywordRule('buồn', 1.4),
-      KeywordRule('chán', 1.2),
-      KeywordRule('khóc', 1.4),
-      KeywordRule('lụy', 1.2),
-      KeywordRule('nhớ', 0.9),
-      KeywordRule('sad', 1.5),
-      KeywordRule('lonely', 1.8),
-      KeywordRule('cry', 1.2),
-      KeywordRule('tired', 1.1),
-      KeywordRule('depressed', 1.8),
-    ],
-    NlpEmotion.angry: [
-      KeywordRule('tức giận', 2.4),
-      KeywordRule('bực mình', 2.0),
-      KeywordRule('khó chịu', 1.8),
-      KeywordRule('điên tiết', 2.2),
-      KeywordRule('phẫn nộ', 2.2),
-      KeywordRule('căng thẳng', 1.7),
-      KeywordRule('tức', 1.2),
-      KeywordRule('giận', 1.4),
-      KeywordRule('bực', 1.2),
-      KeywordRule('cáu', 1.1),
-      KeywordRule('angry', 1.5),
-      KeywordRule('mad', 1.3),
-      KeywordRule('rage', 1.8),
-      KeywordRule('annoyed', 1.4),
-      KeywordRule('stress', 1.2),
-      KeywordRule('stressed', 1.3),
-    ],
-    NlpEmotion.relaxed: [
-      KeywordRule('thư giãn', 2.2),
-      KeywordRule('bình yên', 2.0),
-      KeywordRule('nhẹ nhàng', 1.8),
-      KeywordRule('êm dịu', 1.7),
-      KeywordRule('nghỉ ngơi', 1.5),
-      KeywordRule('an yên', 1.8),
-      KeywordRule('tĩnh lặng', 1.5),
-      KeywordRule('chill', 1.4),
-      KeywordRule('calm', 1.5),
-      KeywordRule('relax', 1.4),
-      KeywordRule('relaxed', 1.5),
-      KeywordRule('peaceful', 1.5),
-      KeywordRule('sleep', 1.2),
-      KeywordRule('healing', 1.2),
-    ],
-  };
-
-  static const contrastMarkers = [
-    'nhưng',
-    'nhung',
-    'tuy nhiên',
-    'tuy nhien',
-    'dù vậy',
-    'du vay',
-    'song',
-    'but',
-    'however',
-  ];
 
   Future<EmotionDetectResult> detectTextEmotion(
     String text, {
-    int limit = 10,
+    int limit = 9,
   }) async {
     final cleanText = text.trim();
 
     if (cleanText.isEmpty) {
-      throw Exception('Vui lòng nhập nội dung trước khi phân tích.');
+      throw Exception('Vui lòng nhập nội dung cảm xúc trước khi phân tích.');
     }
 
-    final token = await _tokenStorage.getToken();
+    final local = _detectLocalEmotion(cleanText);
+    final backend = await _detectBackendEmotion(cleanText);
 
-    if (token == null || token.isEmpty) {
-      throw Exception('Bạn cần đăng nhập trước khi nhận diện cảm xúc.');
-    }
+    final selectedEmotion = backend?.emotion ?? local.emotion;
+    final confidence = backend?.confidence ?? local.confidence;
 
-    final localEmotion = _detectLocalEmotion(cleanText);
-
-    final backendEmotionResponse = await _detectBackendEmotion(cleanText);
-    final lyricsMood = await _analyzeLyricsMood(cleanText);
-
-    final backendEmotion = _normalizeNlpEmotion(
-      backendEmotionResponse?['label']?.toString(),
-    );
-    final backendConfidence = _confidenceToUnit(
-      backendEmotionResponse?['confidence'],
+    final probabilities = _normalizeProbabilities(
+      backend?.probabilities ?? local.probabilities,
+      selectedEmotion,
+      confidence,
     );
 
-    final lyricsEmotion = lyricsMood?['mood'] == null
-        ? null
-        : _normalizeNlpEmotion(lyricsMood?['mood']?.toString());
-    final lyricsConfidence = _confidenceToUnit(lyricsMood?['confidence']);
-    final lyricsMatchedKeywords =
-        (lyricsMood?['matched_keywords'] as List?) ?? [];
-
-    final isDefaultLyricsRelax =
-        lyricsEmotion == NlpEmotion.relaxed &&
-        lyricsConfidence <= 0.45 &&
-        lyricsMatchedKeywords.isEmpty;
-
-    late String finalEmotion;
-    late double finalConfidence;
-    late EmotionProbabilities finalProbabilities;
-    late String source;
-
-    if (localEmotion.emotion != null) {
-      finalEmotion = localEmotion.emotion!;
-      finalConfidence = localEmotion.confidence;
-      finalProbabilities = localEmotion.probabilities;
-      source = 'local';
-    } else if (backendEmotionResponse?['label'] != null) {
-      finalEmotion = backendEmotion;
-      finalConfidence = backendConfidence == 0 ? 0.75 : backendConfidence;
-      finalProbabilities = _buildProbabilitiesFromConfidence(
-        finalEmotion,
-        finalConfidence,
-      );
-      source = 'backend';
-    } else if (lyricsEmotion != null && !isDefaultLyricsRelax) {
-      finalEmotion = lyricsEmotion;
-      finalConfidence = lyricsConfidence == 0 ? 0.65 : lyricsConfidence;
-      finalProbabilities = _buildProbabilitiesFromConfidence(
-        finalEmotion,
-        finalConfidence,
-      );
-      source = 'lyrics';
-    } else {
-      finalEmotion = NlpEmotion.relaxed;
-      finalConfidence = 0.65;
-      finalProbabilities = _buildProbabilitiesFromConfidence(
-        finalEmotion,
-        finalConfidence,
-      );
-      source = 'local';
-    }
-
-    final backendRecommendation = await _getBackendRecommendations(
-      emotion: finalEmotion,
-      confidence: finalConfidence,
+    final recommended = await _getBackendRecommendations(
+      emotion: selectedEmotion,
+      confidence: confidence,
       limit: limit,
-      rawEmotion: backendEmotionResponse,
+      valence: backend?.valence,
+      arousal: backend?.arousal,
     );
 
-    final localTracks = await _getTracksByMood(finalEmotion, limit);
+    final fallbackRecommended = recommended.isEmpty
+        ? await _getTracksByMood(emotion: selectedEmotion, limit: limit)
+        : recommended;
 
-    final preferLocalTracks =
-        localTracks.isNotEmpty &&
-        localTracks.any(
-          (track) => _isMoodMatch(
-            track.track.mood ?? track.track.emotion,
-            finalEmotion,
-          ),
-        );
-
-    final mergedTracks = preferLocalTracks
-        ? _mergeUniqueTracks(localTracks, backendRecommendation.tracks)
-        : _mergeUniqueTracks(backendRecommendation.tracks, localTracks);
-
-    final recommendedSongs = _rankTracksByMood(
-      mergedTracks,
-      finalEmotion,
+    final sorted = _rankTracksByMood(
+      fallbackRecommended,
+      selectedEmotion,
     ).take(limit).toList();
 
-    final fallbackRationale =
-        backendRecommendation.rationale ??
-        (lyricsMood != null && !isDefaultLyricsRelax
-            ? 'Mood lyrics: ${lyricsMood['mood']}.'
-            : 'Đề xuất theo cảm xúc $finalEmotion.');
+    final rationale = _buildRationale(
+      text: cleanText,
+      emotion: selectedEmotion,
+      probabilities: probabilities,
+      matchedKeywords: local.matchedKeywords,
+      hasBackend: backend != null,
+    );
 
     return EmotionDetectResult(
-      emotion: finalEmotion,
-      confidence: finalConfidence,
-      confidencePercent: (finalConfidence * 100).round(),
-      probabilities: finalProbabilities,
-      recommendedSongs: recommendedSongs,
-      autoPlaySong: recommendedSongs.isEmpty ? null : recommendedSongs.first,
-      rationale: source == 'local'
-          ? _buildMixedEmotionRationale(localEmotion, fallbackRationale)
-          : fallbackRationale,
+      emotion: selectedEmotion,
+      confidence: confidence.clamp(0, 1).toDouble(),
+      confidencePercent: (confidence.clamp(0, 1) * 100).round(),
+      probabilities: probabilities,
+      recommendedSongs: sorted,
+      autoPlaySong: sorted.isNotEmpty ? sorted.first : null,
+      rationale: rationale,
     );
   }
 
-  Future<Map<String, dynamic>?> _detectBackendEmotion(String text) async {
+  Future<_BackendEmotionResult?> _detectBackendEmotion(String text) async {
     try {
       final response = await _apiClient.dio.post(
         '/api/emotion/detect',
         data: {'text': text},
       );
 
-      return Map<String, dynamic>.from(response.data);
-    } catch (_) {
-      return null;
-    }
-  }
+      final data = response.data;
 
-  Future<Map<String, dynamic>?> _analyzeLyricsMood(String text) async {
-    try {
-      final response = await _apiClient.dio.post(
-        '/lyrics-mood/analyze',
-        data: {'lyrics': text, 'language': 'auto', 'top_k': 3},
+      if (data is! Map) return null;
+
+      final map = Map<String, dynamic>.from(data);
+
+      final rawEmotion =
+          map['emotion'] ??
+          map['label'] ??
+          map['mood'] ??
+          map['prediction'] ??
+          map['dominant_emotion'];
+
+      final emotion = _emotionFromString(rawEmotion?.toString());
+
+      final rawConfidence =
+          map['confidence'] ?? map['score'] ?? map['probability'] ?? 0.75;
+
+      final confidence = _toProbability(rawConfidence);
+
+      return _BackendEmotionResult(
+        emotion: emotion,
+        confidence: confidence,
+        probabilities: _readProbabilities(
+          map['probabilities'] ?? map['scores'],
+        ),
+        valence: _toNullableDouble(map['valence']),
+        arousal: _toNullableDouble(map['arousal']),
       );
-
-      final data = Map<String, dynamic>.from(response.data);
-      final moods = data['moods'];
-
-      if (moods is List && moods.isNotEmpty) {
-        return Map<String, dynamic>.from(moods.first);
-      }
-
+    } on DioException {
       return null;
     } catch (_) {
       return null;
     }
   }
 
-  Future<({List<RecommendedTrack> tracks, String? rationale})>
-  _getBackendRecommendations({
-    required String emotion,
+  Future<List<RecommendedTrack>> _getBackendRecommendations({
+    required NlpEmotion emotion,
     required double confidence,
     required int limit,
-    required Map<String, dynamic>? rawEmotion,
+    double? valence,
+    double? arousal,
   }) async {
     try {
       final response = await _apiClient.dio.post(
@@ -400,199 +265,266 @@ class EmotionRepository {
         data: {
           'user_id': 0,
           'emotion_state': {
-            'label': emotion,
-            'emotion': emotion,
-            'mood': emotion,
+            'label': emotion.key,
+            'emotion': emotion.key,
+            'mood': emotion.key,
             'confidence': confidence,
-            'valence': rawEmotion?['valence'] ?? 0,
-            'arousal': rawEmotion?['arousal'] ?? 0,
+            'valence': valence ?? 0,
+            'arousal': arousal ?? 0,
           },
           'limit': limit,
         },
       );
 
-      final data = Map<String, dynamic>.from(response.data);
-      final rawTracks = data['tracks'];
+      final data = response.data;
 
-      final tracks = rawTracks is List
-          ? rawTracks
-                .whereType<Map>()
-                .map(
-                  (track) => _normalizeTrack(
-                    Map<String, dynamic>.from(track),
-                    emotion,
-                  ),
-                )
-                .toList()
-          : <RecommendedTrack>[];
+      final rawTracks = data is Map
+          ? data['tracks']
+          : data is List
+          ? data
+          : null;
 
-      return (
-        tracks: _rankTracksByMood(tracks, emotion),
-        rationale: data['rationale']?.toString(),
-      );
+      if (rawTracks is! List) return [];
+
+      return rawTracks
+          .whereType<Map>()
+          .toList()
+          .asMap()
+          .entries
+          .map(
+            (entry) => RecommendedTrack.fromJson(
+              Map<String, dynamic>.from(entry.value),
+              index: entry.key,
+              fallbackEmotion: emotion,
+            ),
+          )
+          .toList();
     } catch (_) {
-      return (tracks: <RecommendedTrack>[], rationale: null);
+      return [];
     }
   }
 
-  Future<List<RecommendedTrack>> _getTracksByMood(
-    String emotion,
-    int limit,
-  ) async {
+  Future<List<RecommendedTrack>> _getTracksByMood({
+    required NlpEmotion emotion,
+    required int limit,
+  }) async {
     try {
       final response = await _apiClient.dio.get('/tracks/');
       final data = response.data;
 
       if (data is! List) return [];
 
-      final tracks = data
+      return data
           .whereType<Map>()
+          .toList()
+          .asMap()
+          .entries
           .map(
-            (track) =>
-                _normalizeTrack(Map<String, dynamic>.from(track), emotion),
+            (entry) => RecommendedTrack.fromJson(
+              Map<String, dynamic>.from(entry.value),
+              index: entry.key,
+              fallbackEmotion: emotion,
+            ),
           )
+          .toList()
+          .take(limit)
           .toList();
-
-      return _rankTracksByMood(tracks, emotion).take(limit).toList();
     } catch (_) {
       return [];
     }
   }
 
-  RecommendedTrack _normalizeTrack(Map<String, dynamic> json, String emotion) {
-    final mood =
-        json['mood']?.toString() ?? json['emotion']?.toString() ?? emotion;
-
-    final matched = _isMoodMatch(mood, emotion);
-
-    final score = _toDouble(
-      json['recommendation_score'],
-      fallback: matched ? 95 : 55,
-    );
-
-    final track = Track(
-      id: _toInt(json['id']),
-      title: json['title']?.toString() ?? 'Không rõ tên bài hát',
-      artist: json['artist']?.toString() ?? 'Unknown Artist',
-      audioUrl: json['audio_url']?.toString(),
-      coverImage: json['cover_image']?.toString(),
-      durationSeconds: _toInt(json['duration']),
-      emotion: json['emotion']?.toString() ?? mood,
-      mood: mood,
-      emotionLabelVi: json['emotion_label_vi']?.toString(),
-      lyrics: json['lyrics']?.toString(),
-    );
-
-    return RecommendedTrack(
-      track: track,
-      recommendationScore: score,
-      matchedMood: json['matched_mood']?.toString() ?? mood,
-    );
-  }
-
-  LocalEmotionResult _detectLocalEmotion(String text) {
-    final scores = _emptyProbabilities();
-    final matchedKeywords = {
-      for (final emotion in NlpEmotion.values) emotion: <String>[],
-    };
-
-    for (final entry in localKeywords.entries) {
-      final result = _scoreKeywordRules(text, entry.value);
-      scores[entry.key] = scores[entry.key]! + result.score;
-      matchedKeywords[entry.key]!.addAll(result.matchedKeywords);
-    }
-
-    final contrastTail = _getContrastTail(text);
-
-    if (contrastTail.isNotEmpty) {
-      for (final entry in localKeywords.entries) {
-        final result = _scoreKeywordRules(contrastTail, entry.value);
-        scores[entry.key] = scores[entry.key]! + result.score * 0.25;
-      }
-    }
-
-    final probabilities = _normalizeScoresToProbabilities(scores);
-    final sorted = probabilities.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    final totalScore = scores.values.fold<double>(0, (sum, item) => sum + item);
-
-    if (totalScore <= 0) {
-      return LocalEmotionResult(
-        emotion: null,
-        confidence: 0,
-        scores: scores,
-        probabilities: probabilities,
-        matchedKeywords: matchedKeywords,
-      );
-    }
-
-    return LocalEmotionResult(
-      emotion: sorted.first.key,
-      confidence: sorted.first.value,
-      scores: scores,
-      probabilities: probabilities,
-      matchedKeywords: matchedKeywords,
-    );
-  }
-
-  ({double score, List<String> matchedKeywords}) _scoreKeywordRules(
-    String text,
-    List<KeywordRule> rules,
-  ) {
-    final normalizedText = ' ${_normalizeVietnameseText(text)} ';
-    final matchedKeywords = <String>[];
-    double score = 0;
-
-    final sortedRules = [...rules]
-      ..sort(
-        (a, b) => _normalizeVietnameseText(
-          b.keyword,
-        ).length.compareTo(_normalizeVietnameseText(a.keyword).length),
-      );
-
-    for (final rule in sortedRules) {
-      final keyword = _normalizeVietnameseText(rule.keyword);
-      if (keyword.isEmpty) continue;
-
-      if (normalizedText.contains(' $keyword ')) {
-        matchedKeywords.add(rule.keyword);
-        score += rule.weight;
-      }
-    }
-
-    return (score: score, matchedKeywords: matchedKeywords);
-  }
-
-  String _getContrastTail(String text) {
+  _LocalEmotionResult _detectLocalEmotion(String text) {
     final normalized = _normalizeVietnameseText(text);
 
-    for (final marker in contrastMarkers) {
-      final normalizedMarker = _normalizeVietnameseText(marker);
-      final pattern = ' $normalizedMarker ';
-      final index = normalized.indexOf(pattern);
-
-      if (index >= 0) {
-        return normalized.substring(index + pattern.length).trim();
-      }
-    }
-
-    return '';
-  }
-
-  EmotionProbabilities _emptyProbabilities() {
-    return {
+    final scores = <NlpEmotion, double>{
       NlpEmotion.happy: 0,
       NlpEmotion.sad: 0,
       NlpEmotion.angry: 0,
       NlpEmotion.relaxed: 0,
     };
+
+    final matched = <String>[];
+
+    void score(NlpEmotion emotion, Map<String, double> keywords) {
+      for (final entry in keywords.entries) {
+        if (normalized.contains(entry.key)) {
+          scores[emotion] = (scores[emotion] ?? 0) + entry.value;
+          matched.add(entry.key);
+        }
+      }
+    }
+
+    score(NlpEmotion.happy, {
+      'vui': 2.2,
+      'vui ve': 2.4,
+      'hanh phuc': 2.7,
+      'tuyet': 1.8,
+      'tich cuc': 2.0,
+      'yeu doi': 2.2,
+      'phan khoi': 2.0,
+      'hao hung': 1.8,
+      'happy': 2.2,
+      'joy': 2.2,
+      'great': 1.8,
+    });
+
+    score(NlpEmotion.sad, {
+      'buon': 2.4,
+      'co don': 2.8,
+      'met moi': 2.2,
+      'chan nan': 2.5,
+      'that vong': 2.5,
+      'khoc': 2.4,
+      'dau long': 2.6,
+      'nho': 1.2,
+      'sad': 2.2,
+      'lonely': 2.7,
+      'tired': 1.8,
+    });
+
+    score(NlpEmotion.angry, {
+      'tuc': 2.4,
+      'gian': 2.5,
+      'buc': 2.2,
+      'kho chiu': 2.3,
+      'cang thang': 2.0,
+      'stress': 2.0,
+      'ap luc': 1.8,
+      'phat dien': 2.7,
+      'angry': 2.5,
+      'mad': 2.0,
+    });
+
+    score(NlpEmotion.relaxed, {
+      'thu gian': 2.6,
+      'binh yen': 2.4,
+      'nhe nhang': 2.2,
+      'chill': 2.1,
+      'ngu': 1.6,
+      'yen tinh': 2.0,
+      'chua lanh': 2.2,
+      'calm': 2.2,
+      'relax': 2.4,
+      'peace': 2.0,
+    });
+
+    final contrastTail = _getContrastTail(normalized);
+
+    if (contrastTail != null) {
+      for (final emotion in NlpEmotion.values) {
+        final tailLocal = _detectTailScore(contrastTail, emotion);
+        scores[emotion] = (scores[emotion] ?? 0) + tailLocal * 0.35;
+      }
+    }
+
+    final probabilities = _scoresToProbabilities(scores);
+    final sorted = probabilities.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final top = sorted.first;
+
+    return _LocalEmotionResult(
+      emotion: top.key,
+      confidence: top.value,
+      probabilities: probabilities,
+      matchedKeywords: matched,
+    );
   }
 
-  EmotionProbabilities _normalizeScoresToProbabilities(
-    EmotionProbabilities scores,
+  double _detectTailScore(String text, NlpEmotion emotion) {
+    final local = _detectLocalEmotionWithoutContrast(text);
+
+    return local[emotion] ?? 0;
+  }
+
+  Map<NlpEmotion, double> _detectLocalEmotionWithoutContrast(String text) {
+    final scores = <NlpEmotion, double>{
+      NlpEmotion.happy: 0,
+      NlpEmotion.sad: 0,
+      NlpEmotion.angry: 0,
+      NlpEmotion.relaxed: 0,
+    };
+
+    void add(NlpEmotion emotion, List<String> words) {
+      for (final word in words) {
+        if (text.contains(word)) {
+          scores[emotion] = (scores[emotion] ?? 0) + 1;
+        }
+      }
+    }
+
+    add(NlpEmotion.happy, ['vui', 'hanh phuc', 'tuyet', 'happy']);
+    add(NlpEmotion.sad, ['buon', 'co don', 'met moi', 'sad', 'lonely']);
+    add(NlpEmotion.angry, ['tuc', 'gian', 'buc', 'stress', 'angry']);
+    add(NlpEmotion.relaxed, ['thu gian', 'binh yen', 'nhe nhang', 'chill']);
+
+    return scores;
+  }
+
+  List<RecommendedTrack> _rankTracksByMood(
+    List<RecommendedTrack> tracks,
+    NlpEmotion emotion,
   ) {
-    final rawTotal = scores.values.fold<double>(0, (sum, item) => sum + item);
+    final result = [...tracks];
+
+    result.sort((a, b) {
+      final aMood =
+          _isMoodMatch(a.track.moodText, emotion) ||
+          _isMoodMatch(a.moodText, emotion);
+      final bMood =
+          _isMoodMatch(b.track.moodText, emotion) ||
+          _isMoodMatch(b.moodText, emotion);
+
+      if (aMood != bMood) {
+        return aMood ? -1 : 1;
+      }
+
+      return b.recommendationScore.compareTo(a.recommendationScore);
+    });
+
+    return result;
+  }
+
+  bool _isMoodMatch(String value, NlpEmotion emotion) {
+    final normalized = _normalizeVietnameseText(value);
+
+    switch (emotion) {
+      case NlpEmotion.happy:
+        return normalized.contains('happy') ||
+            normalized.contains('vui') ||
+            normalized.contains('joy') ||
+            normalized.contains('positive');
+      case NlpEmotion.sad:
+        return normalized.contains('sad') ||
+            normalized.contains('buon') ||
+            normalized.contains('co don') ||
+            normalized.contains('lonely');
+      case NlpEmotion.angry:
+        return normalized.contains('angry') ||
+            normalized.contains('gian') ||
+            normalized.contains('tuc') ||
+            normalized.contains('stress');
+      case NlpEmotion.relaxed:
+        return normalized.contains('relax') ||
+            normalized.contains('relaxed') ||
+            normalized.contains('calm') ||
+            normalized.contains('thu gian') ||
+            normalized.contains('chill') ||
+            normalized.contains('binh yen');
+    }
+  }
+
+  Map<NlpEmotion, double> _scoresToProbabilities(
+    Map<NlpEmotion, double> scores,
+  ) {
+    final damped = <NlpEmotion, double>{};
+
+    for (final emotion in NlpEmotion.values) {
+      damped[emotion] = math.sqrt(math.max(0, scores[emotion] ?? 0));
+    }
+
+    final rawTotal = damped.values.fold<double>(0, (sum, value) => sum + value);
 
     if (rawTotal <= 0) {
       return {
@@ -604,161 +536,169 @@ class EmotionRepository {
     }
 
     const smoothing = 0.08;
-    final damped = {
-      for (final emotion in NlpEmotion.values)
-        emotion: sqrt(max(0, scores[emotion] ?? 0)),
-    };
-
-    final total = NlpEmotion.values.fold<double>(
+    final total = damped.values.fold<double>(
       0,
-      (sum, emotion) => sum + damped[emotion]! + smoothing,
+      (sum, value) => sum + value + smoothing,
     );
 
     return {
       for (final emotion in NlpEmotion.values)
-        emotion: (damped[emotion]! + smoothing) / total,
+        emotion: ((damped[emotion] ?? 0) + smoothing) / total,
     };
   }
 
-  EmotionProbabilities _buildProbabilitiesFromConfidence(
-    String emotion,
+  Map<NlpEmotion, double> _normalizeProbabilities(
+    Map<NlpEmotion, double> source,
+    NlpEmotion emotion,
     double confidence,
   ) {
-    final safeConfidence = confidence.clamp(0.25, 0.98);
-    final rest = max(0, 1 - safeConfidence) / 3;
+    if (source.isEmpty) {
+      final safeConfidence = confidence.clamp(0.25, 0.98).toDouble();
+      final rest = (1 - safeConfidence) / 3;
+
+      return {
+        NlpEmotion.happy: emotion == NlpEmotion.happy ? safeConfidence : rest,
+        NlpEmotion.sad: emotion == NlpEmotion.sad ? safeConfidence : rest,
+        NlpEmotion.angry: emotion == NlpEmotion.angry ? safeConfidence : rest,
+        NlpEmotion.relaxed: emotion == NlpEmotion.relaxed
+            ? safeConfidence
+            : rest,
+      };
+    }
+
+    final total = source.values.fold<double>(0, (sum, value) => sum + value);
+
+    if (total <= 0) {
+      return {
+        NlpEmotion.happy: 0.25,
+        NlpEmotion.sad: 0.25,
+        NlpEmotion.angry: 0.25,
+        NlpEmotion.relaxed: 0.25,
+      };
+    }
 
     return {
-      NlpEmotion.happy: emotion == NlpEmotion.happy ? safeConfidence : rest,
-      NlpEmotion.sad: emotion == NlpEmotion.sad ? safeConfidence : rest,
-      NlpEmotion.angry: emotion == NlpEmotion.angry ? safeConfidence : rest,
-      NlpEmotion.relaxed: emotion == NlpEmotion.relaxed ? safeConfidence : rest,
+      for (final item in source.entries)
+        item.key: (item.value / total).clamp(0, 1).toDouble(),
     };
   }
 
-  String _normalizeNlpEmotion(String? value) {
-    final raw = _normalizeVietnameseText(value ?? 'relaxed');
+  Map<NlpEmotion, double>? _readProbabilities(dynamic value) {
+    if (value is! Map) return null;
 
-    for (final entry in moodAliases.entries) {
-      if (entry.value.any((alias) => _normalizeVietnameseText(alias) == raw)) {
-        return entry.key;
+    final result = <NlpEmotion, double>{};
+
+    for (final emotion in NlpEmotion.values) {
+      final raw =
+          value[emotion.key] ??
+          value[emotion.labelVi] ??
+          value[_normalizeVietnameseText(emotion.labelVi)];
+
+      if (raw != null) {
+        result[emotion] = _toProbability(raw);
       }
     }
 
-    if (raw.contains('vui') ||
-        raw.contains('happy') ||
-        raw.contains('joy') ||
-        raw.contains('positive')) {
+    return result.isEmpty ? null : result;
+  }
+
+  NlpEmotion _emotionFromString(String? value) {
+    final normalized = _normalizeVietnameseText(value ?? '');
+
+    if (normalized.contains('happy') ||
+        normalized.contains('joy') ||
+        normalized.contains('vui') ||
+        normalized.contains('positive')) {
       return NlpEmotion.happy;
     }
 
-    if (raw.contains('buon') ||
-        raw.contains('sad') ||
-        raw.contains('lonely') ||
-        raw.contains('co don')) {
+    if (normalized.contains('sad') ||
+        normalized.contains('buon') ||
+        normalized.contains('lonely') ||
+        normalized.contains('co don')) {
       return NlpEmotion.sad;
     }
 
-    if (raw.contains('angry') ||
-        raw.contains('stress') ||
-        raw.contains('cang') ||
-        raw.contains('gian') ||
-        raw.contains('buc') ||
-        raw.contains('kho chiu')) {
+    if (normalized.contains('angry') ||
+        normalized.contains('anger') ||
+        normalized.contains('gian') ||
+        normalized.contains('tuc') ||
+        normalized.contains('stress')) {
       return NlpEmotion.angry;
     }
 
     return NlpEmotion.relaxed;
   }
 
-  bool _isMoodMatch(String? trackMood, String emotion) {
-    final raw = _normalizeVietnameseText(trackMood ?? '');
-    if (raw.isEmpty) return false;
+  String _buildRationale({
+    required String text,
+    required NlpEmotion emotion,
+    required Map<NlpEmotion, double> probabilities,
+    required List<String> matchedKeywords,
+    required bool hasBackend,
+  }) {
+    final rows = probabilities.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
 
-    return moodAliases[emotion]!.any((alias) {
-      final normalizedAlias = _normalizeVietnameseText(alias);
-      return raw == normalizedAlias || raw.contains(normalizedAlias);
-    });
+    final strongRows = rows
+        .where((entry) => entry.value >= 0.12)
+        .map((entry) => '${entry.key.labelVi}: ${(entry.value * 100).round()}%')
+        .toList();
+
+    final source = hasBackend ? 'Backend AI + bộ lọc local' : 'Bộ lọc local';
+
+    if (strongRows.length >= 2) {
+      return '$source phát hiện câu có nhiều sắc thái cảm xúc: ${strongRows.join(", ")}.';
+    }
+
+    if (matchedKeywords.isNotEmpty) {
+      return '$source nhận diện cảm xúc chính là ${emotion.labelVi} dựa trên các tín hiệu: ${matchedKeywords.take(6).join(", ")}.';
+    }
+
+    return '$source nhận diện cảm xúc chính là ${emotion.labelVi}.';
   }
 
-  List<RecommendedTrack> _rankTracksByMood(
-    List<RecommendedTrack> tracks,
-    String emotion,
-  ) {
-    final sorted = [...tracks];
+  double _toProbability(dynamic value) {
+    final raw = _toNullableDouble(value) ?? 0.75;
 
-    sorted.sort((a, b) {
-      final aMatched = _isMoodMatch(a.track.mood ?? a.track.emotion, emotion)
-          ? 1
-          : 0;
-      final bMatched = _isMoodMatch(b.track.mood ?? b.track.emotion, emotion)
-          ? 1
-          : 0;
+    if (raw > 1) {
+      return (raw / 100).clamp(0, 1).toDouble();
+    }
 
-      if (aMatched != bMatched) {
-        return bMatched.compareTo(aMatched);
+    return raw.clamp(0, 1).toDouble();
+  }
+
+  double? _toNullableDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+
+    return double.tryParse(value?.toString() ?? '');
+  }
+
+  String? _getContrastTail(String text) {
+    final separators = [
+      ' nhung ',
+      ' tuy nhien ',
+      ' ma ',
+      ' con ',
+      ' nhưng ',
+      ' tuy nhiên ',
+    ];
+
+    for (final separator in separators) {
+      final index = text.lastIndexOf(separator);
+
+      if (index >= 0 && index + separator.length < text.length) {
+        return text.substring(index + separator.length).trim();
       }
-
-      return b.recommendationScore.compareTo(a.recommendationScore);
-    });
-
-    return sorted;
-  }
-
-  List<RecommendedTrack> _mergeUniqueTracks(
-    List<RecommendedTrack> first,
-    List<RecommendedTrack> second,
-  ) {
-    final map = <int, RecommendedTrack>{};
-
-    for (final track in [...first, ...second]) {
-      map.putIfAbsent(track.track.id, () => track);
     }
 
-    return map.values.toList();
-  }
-
-  String _buildMixedEmotionRationale(
-    LocalEmotionResult localEmotion,
-    String fallback,
-  ) {
-    final rows =
-        localEmotion.probabilities.entries
-            .where((entry) => entry.value >= 0.12)
-            .toList()
-          ..sort((a, b) => b.value.compareTo(a.value));
-
-    if (rows.length >= 2) {
-      final text = rows
-          .map((entry) {
-            final label = labels[entry.key]?['vi'] ?? entry.key;
-            final percent = (entry.value * 100).round();
-
-            return '$label: $percent%';
-          })
-          .join(', ');
-
-      return 'Câu có nhiều sắc thái cảm xúc: $text.';
-    }
-
-    return fallback;
-  }
-
-  double _confidenceToUnit(dynamic value) {
-    final numeric = _toDouble(value, fallback: 0);
-
-    if (numeric > 1) {
-      return (numeric / 100).clamp(0, 1);
-    }
-
-    return numeric.clamp(0, 1);
-  }
-
-  String emotionNameLabel(String emotion, {String language = 'vi'}) {
-    return labels[emotion]?[language] ?? emotion;
+    return null;
   }
 
   String _normalizeVietnameseText(String value) {
-    var text = value.toLowerCase();
+    var text = value.toLowerCase().trim();
 
     const replacements = {
       'à': 'a',
@@ -830,27 +770,10 @@ class EmotionRepository {
       'đ': 'd',
     };
 
-    replacements.forEach((key, value) {
-      text = text.replaceAll(key, value);
+    replacements.forEach((from, to) {
+      text = text.replaceAll(from, to);
     });
 
-    text = text.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
-    text = text.replaceAll(RegExp(r'\s+'), ' ');
-
-    return text.trim();
-  }
-
-  int _toInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '') ?? 0;
-  }
-
-  double _toDouble(dynamic value, {required double fallback}) {
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is num) return value.toDouble();
-
-    return double.tryParse(value?.toString() ?? '') ?? fallback;
+    return text.replaceAll(RegExp(r'\s+'), ' ');
   }
 }
