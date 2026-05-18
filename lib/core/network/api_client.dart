@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+
 import '../config/app_config.dart';
 import '../storage/token_storage.dart';
 
@@ -19,10 +20,13 @@ class ApiClient {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final token = await _tokenStorage.getToken();
-          if (token != null && token.isNotEmpty) {
-            options.headers['Authorization'] = 'Bearer $token';
-          }
+          try {
+            final token = await _tokenStorage.getToken();
+            if (token != null && token.isNotEmpty) {
+              options.headers['Authorization'] = 'Bearer $token';
+            }
+          } catch (_) {}
+
           handler.next(options);
         },
       ),
@@ -33,24 +37,28 @@ class ApiClient {
   late final Dio dio;
 
   String mediaUrl(String? value) {
-    if (value == null || value.isEmpty) return '';
-    if (value.startsWith('http://') || value.startsWith('https://')) {
-      return value;
-    }
-    if (value.startsWith('/media/')) {
-      return '${AppConfig.apiBaseUrl}$value';
-    }
-    return '${AppConfig.apiBaseUrl}/media/$value';
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return '';
+
+    final url = raw.startsWith('http://') || raw.startsWith('https://')
+        ? raw
+        : raw.startsWith('/media/')
+        ? '${AppConfig.apiBaseUrl}$raw'
+        : '${AppConfig.apiBaseUrl}/media/$raw';
+
+    return Uri.encodeFull(url);
   }
 
   String imageUrl(String? value) {
-    if (value == null || value.isEmpty) return '';
-    if (value.startsWith('http://') || value.startsWith('https://')) {
-      return value;
-    }
-    if (value.startsWith('/images/')) {
-      return '${AppConfig.apiBaseUrl}$value';
-    }
-    return '${AppConfig.apiBaseUrl}/images/$value';
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return '';
+
+    final url = raw.startsWith('http://') || raw.startsWith('https://')
+        ? raw
+        : raw.startsWith('/images/')
+        ? '${AppConfig.apiBaseUrl}$raw'
+        : '${AppConfig.apiBaseUrl}/images/$raw';
+
+    return Uri.encodeFull(url);
   }
 }

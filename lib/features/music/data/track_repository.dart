@@ -15,7 +15,11 @@ class TrackRepository {
     return data.whereType<Map<String, dynamic>>().map(Track.fromJson).toList();
   }
 
-  String audioUrl(Track track) => _apiClient.mediaUrl(track.audioUrl);
+  String getAudioUrl(Track track) {
+    return _apiClient.mediaUrl(track.audioUrl);
+  }
 
-  String coverUrl(Track track) => _apiClient.imageUrl(track.coverImage);
+  String getCoverUrl(Track track) {
+    return _apiClient.imageUrl(track.coverImage);
+  }
 }
