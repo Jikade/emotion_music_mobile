@@ -3,27 +3,43 @@ class AuthUser {
   final String email;
   final String name;
 
-  AuthUser({required this.id, required this.email, required this.name});
+  const AuthUser({required this.id, required this.email, required this.name});
 
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
-      id: json['id'] ?? 0,
-      email: json['email'] ?? '',
-      name: json['name'] ?? '',
+      id: _toInt(json['id']),
+      email: json['email']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'id': id, 'email': email, 'name': name};
+  }
+
+  static int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
 
-class AuthSession {
+class TokenResponse {
   final String accessToken;
+  final String tokenType;
   final AuthUser user;
 
-  AuthSession({required this.accessToken, required this.user});
+  const TokenResponse({
+    required this.accessToken,
+    required this.tokenType,
+    required this.user,
+  });
 
-  factory AuthSession.fromJson(Map<String, dynamic> json) {
-    return AuthSession(
-      accessToken: json['access_token'] ?? '',
-      user: AuthUser.fromJson(json['user'] ?? {}),
+  factory TokenResponse.fromJson(Map<String, dynamic> json) {
+    return TokenResponse(
+      accessToken: json['access_token']?.toString() ?? '',
+      tokenType: json['token_type']?.toString() ?? 'bearer',
+      user: AuthUser.fromJson(Map<String, dynamic>.from(json['user'] ?? {})),
     );
   }
 }
