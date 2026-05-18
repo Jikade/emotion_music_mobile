@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Emotion Music Flutter - Android Emulator",
+      "request": "launch",
+      "type": "dart",
+      "toolArgs": ["--dart-define=API_BASE_URL=http://10.0.2.2:8000"]
+    }
+  ]
+}
