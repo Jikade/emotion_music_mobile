@@ -1,5 +1,8 @@
 import 'package:go_router/go_router.dart';
 
+import 'features/history/presentation/lich_su_screen.dart';
+import 'features/recommendations/presentation/goi_y_screen.dart';
+
 import 'features/auth/presentation/auth_form_screen.dart';
 import 'features/emotion/presentation/nhan_dien_cam_xuc_screen.dart';
 import 'features/music/presentation/bang_dieu_khien_screen.dart';
@@ -33,6 +36,18 @@ final appRouter = GoRouter(
       path: '/thuVien',
       builder: (context, state) {
         return const AppShell(currentIndex: 1, child: ThuVienScreen());
+      },
+    ),
+    GoRoute(
+      path: '/lichSu',
+      builder: (context, state) {
+        return const AppShell(currentIndex: 4, child: LichSuScreen());
+      },
+    ),
+    GoRoute(
+      path: '/goiY',
+      builder: (context, state) {
+        return const AppShell(currentIndex: 4, child: GoiYScreen());
       },
     ),
     GoRoute(

@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart' as ja;
 
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/token_storage.dart';
+import '../../history/data/history_repository.dart';
 import '../data/like_repository.dart';
 import '../data/track_repository.dart';
 import '../models/track.dart';
@@ -149,6 +150,10 @@ class MusicPlayerController extends Notifier<PlayerState> {
   StreamSubscription<Duration?>? _durationSub;
   StreamSubscription<ja.PlayerState>? _playerStateSub;
 
+  Timer? _historyTimer;
+  int? _historyTrackId;
+  bool _historySavedForCurrentTrack = false;
+
   int _playRequestId = 0;
   int _toggleRequestId = 0;
 
@@ -159,6 +164,7 @@ class MusicPlayerController extends Notifier<PlayerState> {
     Future.microtask(_attachListeners);
 
     ref.onDispose(() {
+      _historyTimer?.cancel();
       _positionSub?.cancel();
       _durationSub?.cancel();
       _playerStateSub?.cancel();
@@ -183,6 +189,7 @@ class MusicPlayerController extends Notifier<PlayerState> {
       final processingState = audioState.processingState;
 
       if (processingState == ja.ProcessingState.completed) {
+        _historyTimer?.cancel();
         _isPreparingSource = false;
 
         state = state.copyWith(
@@ -194,16 +201,45 @@ class MusicPlayerController extends Notifier<PlayerState> {
       }
 
       // Không set isPlaying bằng audioState.playing ở đây.
-      // isPlaying chỉ được đổi bởi playTrack(), togglePlayPause(), stopPlayback().
+      // Nếu set theo audioState.playing, UI play/pause rất dễ bị ghi đè.
       state = state.copyWith(isLoading: _isPreparingSource);
+    });
+  }
+
+  void _resetHistoryTimerForTrack(Track track) {
+    _historyTimer?.cancel();
+    _historyTimer = null;
+    _historyTrackId = track.id;
+    _historySavedForCurrentTrack = false;
+  }
+
+  void _cancelHistoryTimer() {
+    _historyTimer?.cancel();
+    _historyTimer = null;
+  }
+
+  void _scheduleHistorySave(Track track) {
+    if (_historyTrackId == track.id && _historySavedForCurrentTrack) return;
+
+    _historyTimer?.cancel();
+
+    _historyTimer = Timer(const Duration(seconds: 5), () async {
+      if (state.nowPlaying?.id != track.id || !state.isPlaying) return;
+
+      _historySavedForCurrentTrack = true;
+
+      final repository = HistoryRepository(ref.read(apiClientProvider));
+
+      await repository.saveListeningHistory(trackId: track.id, listenMs: 5000);
     });
   }
 
   Future<void> playTrack(Track track, {required List<Track> queue}) async {
     final requestId = ++_playRequestId;
-    _toggleRequestId++;
+    ++_toggleRequestId;
 
     _isPreparingSource = true;
+    _resetHistoryTimerForTrack(track);
 
     final repository = ref.read(trackRepositoryProvider);
     final audioUrl = repository.getAudioUrl(track);
@@ -243,7 +279,11 @@ class MusicPlayerController extends Notifier<PlayerState> {
         preload: true,
       );
 
-      if (requestId != _playRequestId) return;
+      if (requestId != _playRequestId) {
+        _isPreparingSource = false;
+        await _safePause();
+        return;
+      }
 
       final loadedDuration = _audioPlayer.duration;
 
@@ -260,37 +300,42 @@ class MusicPlayerController extends Notifier<PlayerState> {
 
       await _audioPlayer.setVolume(state.isMuted ? 0 : state.volume / 100);
 
-      if (requestId != _playRequestId) return;
-
-      // Đổi UI ngay sang Pause ||.
-      // Nhưng chỉ đổi nếu playTrack này chưa bị togglePlayPause() hủy.
-      state = state.copyWith(
-        isPlaying: true,
-        isLoading: false,
-        clearError: true,
-      );
-
-      await _audioPlayer.play();
-
-      // Nếu user bấm pause trong lúc await play(),
-      // togglePlayPause() đã tăng _playRequestId.
-      // Khi đó playTrack cũ không được set UI về Pause || nữa.
       if (requestId != _playRequestId) {
         await _safePause();
         return;
       }
 
-      _isPreparingSource = false;
-
+      // Đổi icon ngay sang Pause ||
       state = state.copyWith(
         isPlaying: true,
         isLoading: false,
         clearError: true,
       );
+
+      _scheduleHistorySave(track);
+
+      // Không await play().
+      // just_audio.play() có thể giữ Future tới khi pause/stop/completed,
+      // làm các màn gọi playTrack bị loading lâu.
+      unawaited(
+        _audioPlayer.play().catchError((error) {
+          if (requestId != _playRequestId) return;
+
+          _isPreparingSource = false;
+          _cancelHistoryTimer();
+
+          state = state.copyWith(
+            isPlaying: false,
+            isLoading: false,
+            errorMessage: 'Không phát được bài hát: $error',
+          );
+        }),
+      );
     } catch (error) {
       if (requestId != _playRequestId) return;
 
       _isPreparingSource = false;
+      _cancelHistoryTimer();
 
       await _audioPlayer.stop();
 
@@ -311,17 +356,15 @@ class MusicPlayerController extends Notifier<PlayerState> {
 
     final shouldPlay = !state.isPlaying;
 
-    // QUAN TRỌNG:
     // Hủy mọi playTrack() đang chạy dở.
-    // Nếu không, playTrack() có thể chạy tiếp sau lần bấm pause đầu tiên
-    // rồi set lại isPlaying: true, làm icon quay về dấu ||.
+    // Nếu không, playTrack() cũ có thể set lại isPlaying: true
+    // sau khi user đã bấm pause lần đầu.
     ++_playRequestId;
 
     final toggleId = ++_toggleRequestId;
 
     _isPreparingSource = false;
 
-    // Đổi icon ngay lập tức, không chờ just_audio.
     state = state.copyWith(
       isPlaying: shouldPlay,
       isLoading: false,
@@ -330,12 +373,17 @@ class MusicPlayerController extends Notifier<PlayerState> {
 
     try {
       if (shouldPlay) {
+        final track = state.nowPlaying;
+
         if (_audioPlayer.audioSource == null) {
-          final track = state.nowPlaying;
           if (track == null) return;
 
           await playTrack(track, queue: state.queue);
           return;
+        }
+
+        if (track != null) {
+          _scheduleHistorySave(track);
         }
 
         await _audioPlayer.play();
@@ -348,6 +396,8 @@ class MusicPlayerController extends Notifier<PlayerState> {
           clearError: true,
         );
       } else {
+        _cancelHistoryTimer();
+
         await _audioPlayer.pause();
 
         if (toggleId != _toggleRequestId) return;
@@ -360,6 +410,8 @@ class MusicPlayerController extends Notifier<PlayerState> {
       }
     } catch (error) {
       if (toggleId != _toggleRequestId) return;
+
+      _cancelHistoryTimer();
 
       state = state.copyWith(
         isPlaying: false,
@@ -374,6 +426,7 @@ class MusicPlayerController extends Notifier<PlayerState> {
     ++_toggleRequestId;
 
     _isPreparingSource = false;
+    _cancelHistoryTimer();
 
     state = state.copyWith(
       isPlaying: false,
