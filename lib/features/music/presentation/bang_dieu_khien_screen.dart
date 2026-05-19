@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../auth/providers/auth_providers.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/song_grid.dart';
+import '../../auth/providers/auth_providers.dart';
+import '../../payments/presentation/vip_pro_payment_sheet.dart';
 
 class BangDieuKhienScreen extends StatelessWidget {
   const BangDieuKhienScreen({super.key});
@@ -36,43 +37,152 @@ class _DashboardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 760;
+        final isWide = constraints.maxWidth >= 820;
 
-        final title = const Expanded(
-          child: PageHeader(
-            eyebrow: 'Bảng điều khiển',
-            title: 'Không gian nghe của cậu',
-            description:
-                'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
-          ),
+        const title = PageHeader(
+          eyebrow: 'Bảng điều khiển',
+          title: 'Không gian nghe của cậu',
+          description:
+              'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
         );
 
         if (isWide) {
-          return Row(
+          return const Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              title,
-              const SizedBox(width: 16),
-              const _HeaderAuthButton(),
+              Expanded(child: title),
+              SizedBox(width: 16),
+              _HeaderActions(),
             ],
           );
         }
 
         return const Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [title, SizedBox(height: 14), _HeaderActions()],
+        );
+      },
+    );
+  }
+}
+
+class _HeaderActions extends StatelessWidget {
+  const _HeaderActions();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 430;
+
+        if (isNarrow) {
+          return const Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _VipProHeaderButton(expanded: true),
+              SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _HeaderAuthButton(),
+              ),
+            ],
+          );
+        }
+
+        return const Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            PageHeader(
-              eyebrow: 'Bảng điều khiển',
-              title: 'Không gian nghe của cậu',
-              description:
-                  'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
-            ),
-            SizedBox(height: 14),
-            Align(alignment: Alignment.centerRight, child: _HeaderAuthButton()),
+            _VipProHeaderButton(),
+            SizedBox(width: 10),
+            _HeaderAuthButton(),
           ],
         );
       },
     );
+  }
+}
+
+class _VipProHeaderButton extends ConsumerWidget {
+  const _VipProHeaderButton({this.expanded = false});
+
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authControllerProvider);
+    final isVip = authState.user?.isVip == true;
+
+    final child = InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: () {
+        showVipProPaymentSheet(context);
+      },
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 58),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isVip
+                ? [
+                    const Color(0xff34d399).withOpacity(0.24),
+                    const Color(0xff22d3ee).withOpacity(0.10),
+                  ]
+                : [
+                    const Color(0xffffd166).withOpacity(0.28),
+                    const Color(0xfff97316).withOpacity(0.12),
+                  ],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: isVip
+                ? const Color(0xff34d399).withOpacity(0.32)
+                : const Color(0xffffd166).withOpacity(0.36),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: (isVip ? const Color(0xff34d399) : const Color(0xffffd166))
+                  .withOpacity(0.15),
+              blurRadius: 28,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: expanded
+              ? MainAxisAlignment.center
+              : MainAxisAlignment.start,
+          children: [
+            Icon(
+              isVip ? Icons.verified_rounded : Icons.workspace_premium_rounded,
+              color: isVip ? const Color(0xffbbf7d0) : const Color(0xffffd166),
+              size: 21,
+            ),
+            const SizedBox(width: 9),
+            Flexible(
+              child: Text(
+                isVip ? 'VIP PRO' : 'Nâng cấp VIP PRO',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isVip
+                      ? const Color(0xffbbf7d0)
+                      : const Color(0xffffd166),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (expanded) {
+      return SizedBox(width: double.infinity, child: child);
+    }
+
+    return child;
   }
 }
 
@@ -123,7 +233,10 @@ class _HeaderAuthButton extends ConsumerWidget {
 
     final displayName = user.name.trim().isNotEmpty ? user.name.trim() : 'User';
     final email = user.email.trim();
-    final avatarLetter = displayName.characters.first.toUpperCase();
+    final avatarLetter = displayName.trim().isEmpty
+        ? 'U'
+        : displayName.trim().characters.first.toUpperCase();
+    final avatarUrl = user.avatarUrl?.trim();
 
     return _AuthShell(
       child: Row(
@@ -152,15 +265,16 @@ class _HeaderAuthButton extends ConsumerWidget {
                     ),
                   ],
                 ),
-                child: Center(
-                  child: Text(
-                    avatarLetter,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 17,
-                    ),
-                  ),
+                child: ClipOval(
+                  child: avatarUrl != null && avatarUrl.isNotEmpty
+                      ? Image.network(
+                          avatarUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return _AvatarInitial(letter: avatarLetter);
+                          },
+                        )
+                      : _AvatarInitial(letter: avatarLetter),
                 ),
               ),
             ),
@@ -269,6 +383,26 @@ class _HeaderAuthButton extends ConsumerWidget {
     if (!context.mounted) return;
 
     context.go('/dangNhap');
+  }
+}
+
+class _AvatarInitial extends StatelessWidget {
+  const _AvatarInitial({required this.letter});
+
+  final String letter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        letter,
+        style: const TextStyle(
+          color: Colors.black,
+          fontWeight: FontWeight.w900,
+          fontSize: 17,
+        ),
+      ),
+    );
   }
 }
 
