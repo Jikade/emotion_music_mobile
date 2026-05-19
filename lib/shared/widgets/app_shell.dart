@@ -12,7 +12,9 @@ class AppShell extends StatelessWidget {
   int _selectedIndex(String location) {
     if (location.startsWith('/nhanDienCamXuc')) return 1;
     if (location.startsWith('/thuVien')) return 2;
-    if (location.startsWith('/lichSu') || location.startsWith('/goiY')) {
+    if (location.startsWith('/lichSu') ||
+        location.startsWith('/goiY') ||
+        location.startsWith('/caiDat')) {
       return 3;
     }
 
@@ -141,6 +143,17 @@ class AppShell extends StatelessWidget {
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     context.go('/goiY');
+                  },
+                ),
+                const SizedBox(height: 10),
+                _MenuRouteButton(
+                  icon: Icons.settings_rounded,
+                  title: 'Cài đặt tài khoản',
+                  subtitle: 'Xem hồ sơ, trạng thái VIP PRO và đăng xuất',
+                  color: const Color(0xffffd166),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    context.go('/caiDat');
                   },
                 ),
               ],

@@ -29,6 +29,8 @@ class AuthRepository {
       return tokenResponse;
     } on DioException catch (error) {
       throw Exception(_readableError(error));
+    } catch (error) {
+      throw Exception('Không thể đăng nhập: $error');
     }
   }
 
@@ -56,6 +58,8 @@ class AuthRepository {
       return tokenResponse;
     } on DioException catch (error) {
       throw Exception(_readableError(error));
+    } catch (error) {
+      throw Exception('Không thể đăng ký: $error');
     }
   }
 
@@ -83,28 +87,39 @@ class AuthRepository {
       return tokenResponse;
     } on DioException catch (error) {
       throw Exception(_readableError(error));
+    } catch (error) {
+      throw Exception('Không thể đăng nhập Google: $error');
     }
   }
 
   Future<AuthUser> me() async {
     try {
       final response = await _apiClient.dio.get('/auth/me');
-
-      final user = AuthUser.fromJson(Map<String, dynamic>.from(response.data));
+      final user = _parseUser(response.data);
 
       await _tokenStorage.saveUser(user);
 
       return user;
     } on DioException catch (error) {
       throw Exception(_readableError(error));
+    } catch (error) {
+      throw Exception('Không thể tải thông tin tài khoản: $error');
     }
+  }
+
+  Future<AuthUser> getCurrentUser() async {
+    return me();
+  }
+
+  Future<void> saveUser(AuthUser user) async {
+    await _tokenStorage.saveUser(user);
   }
 
   Future<void> logout() async {
     try {
       await _apiClient.dio.post('/auth/logout');
     } catch (_) {
-      // JWT stateless nên chỉ cần xóa token phía app.
+      // JWT stateless: nếu backend logout lỗi thì app vẫn xoá token local.
     } finally {
       await _tokenStorage.clearToken();
     }
@@ -123,11 +138,29 @@ class AuthRepository {
     await _tokenStorage.saveUser(tokenResponse.user);
   }
 
+  AuthUser _parseUser(dynamic data) {
+    if (data is Map<String, dynamic>) {
+      return AuthUser.fromJson(data);
+    }
+
+    if (data is Map) {
+      return AuthUser.fromJson(Map<String, dynamic>.from(data));
+    }
+
+    throw Exception('Backend trả dữ liệu user không hợp lệ.');
+  }
+
   String _readableError(DioException error) {
     final data = error.response?.data;
 
     if (data is Map && data['detail'] != null) {
-      return data['detail'].toString();
+      final detail = data['detail'];
+
+      if (detail is List) {
+        return detail.map((item) => item.toString()).join('\n');
+      }
+
+      return detail.toString();
     }
 
     if (data is String && data.trim().isNotEmpty) {
@@ -136,6 +169,12 @@ class AuthRepository {
 
     if (error.type == DioExceptionType.connectionError) {
       return 'Không kết nối được backend. Kiểm tra API_BASE_URL và Docker backend.';
+    }
+
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.sendTimeout) {
+      return 'Kết nối backend quá lâu. Hãy kiểm tra backend FastAPI có đang chạy không.';
     }
 
     return error.message ?? 'Có lỗi xảy ra khi gọi API xác thực.';

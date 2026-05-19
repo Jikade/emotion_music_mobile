@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../features/music/providers/music_providers.dart';
+import '../../music/providers/music_providers.dart';
 import '../data/auth_repository.dart';
 import '../data/google_auth_service.dart';
 import '../models/auth_models.dart';
@@ -74,15 +74,34 @@ class AuthController extends Notifier<AuthState> {
     }
 
     if (storedUser != null) {
-      state = AuthState(token: token, user: storedUser);
+      state = AuthState(token: token, user: storedUser, isLoading: false);
     }
 
     try {
       final user = await _repository.me();
 
-      state = AuthState(token: token, user: user);
+      state = AuthState(token: token, user: user, isLoading: false);
     } catch (_) {
       state = const AuthState();
+    }
+  }
+
+  Future<void> refreshUser() async {
+    if (state.user == null) return;
+
+    try {
+      final user = await _repository.me();
+
+      state = state.copyWith(user: user, isLoading: false, clearError: true);
+
+      await _repository.saveUser(user);
+    } catch (error) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: error.toString().replaceFirst('Exception: ', ''),
+      );
+
+      rethrow;
     }
   }
 
@@ -95,7 +114,11 @@ class AuthController extends Notifier<AuthState> {
         password: password,
       );
 
-      state = AuthState(token: response.accessToken, user: response.user);
+      state = AuthState(
+        token: response.accessToken,
+        user: response.user,
+        isLoading: false,
+      );
     } catch (error) {
       state = state.copyWith(
         isLoading: false,
@@ -118,7 +141,11 @@ class AuthController extends Notifier<AuthState> {
         password: password,
       );
 
-      state = AuthState(token: response.accessToken, user: response.user);
+      state = AuthState(
+        token: response.accessToken,
+        user: response.user,
+        isLoading: false,
+      );
     } catch (error) {
       state = state.copyWith(
         isLoading: false,
@@ -139,7 +166,11 @@ class AuthController extends Notifier<AuthState> {
         accessToken: googleCredential.accessToken,
       );
 
-      state = AuthState(token: response.accessToken, user: response.user);
+      state = AuthState(
+        token: response.accessToken,
+        user: response.user,
+        isLoading: false,
+      );
     } catch (error) {
       state = state.copyWith(
         isLoading: false,

@@ -129,29 +129,38 @@ class _HeaderAuthButton extends ConsumerWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [Color(0xff22d3ee), Color(0xffa78bfa)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xff22d3ee).withOpacity(0.24),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
+          Tooltip(
+            message: 'Mở cài đặt tài khoản',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () {
+                context.go('/caiDat');
+              },
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xff22d3ee), Color(0xffa78bfa)],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xff22d3ee).withOpacity(0.24),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Center(
-              child: Text(
-                avatarLetter,
-                style: const TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 17,
+                child: Center(
+                  child: Text(
+                    avatarLetter,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 17,
+                    ),
+                  ),
                 ),
               ),
             ),

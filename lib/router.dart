@@ -1,5 +1,7 @@
 import 'package:go_router/go_router.dart';
 
+import 'features/settings/presentation/cai_dat_screen.dart';
+
 import 'features/history/presentation/lich_su_screen.dart';
 import 'features/recommendations/presentation/goi_y_screen.dart';
 
@@ -24,6 +26,12 @@ final appRouter = GoRouter(
       path: '/dangKy',
       builder: (context, state) {
         return const AuthFormScreen(mode: AuthFormMode.register);
+      },
+    ),
+    GoRoute(
+      path: '/caiDat',
+      builder: (context, state) {
+        return const AppShell(currentIndex: 4, child: CaiDatScreen());
       },
     ),
     GoRoute(
