@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 
 import 'bottom_mini_player.dart';
 
+import '../../features/assistant/presentation/ai_assistant_panel.dart';
+
 class AppShell extends StatelessWidget {
   const AppShell({super.key, this.currentIndex, required this.child});
 
@@ -172,15 +174,22 @@ class AppShell extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xff05070d),
       body: SafeArea(
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment.topLeft,
-              radius: 1.25,
-              colors: [Color(0x2214b8a6), Color(0xff05070d)],
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.topLeft,
+                    radius: 1.25,
+                    colors: [Color(0x2214b8a6), Color(0xff05070d)],
+                  ),
+                ),
+                child: child,
+              ),
             ),
-          ),
-          child: child,
+            const AIAssistantPanel(),
+          ],
         ),
       ),
       bottomNavigationBar: Column(
