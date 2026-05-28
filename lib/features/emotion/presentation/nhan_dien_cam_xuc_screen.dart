@@ -1,6 +1,5 @@
-import 'dart:math' as math;
-import 'dart:ui';
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
-import '../../../core/utils/formatters.dart';
 import '../../music/models/track.dart';
 import '../../music/providers/music_providers.dart';
 import '../data/emotion_repository.dart';
@@ -263,17 +261,12 @@ class _NhanDienCamXucScreenState extends ConsumerState<NhanDienCamXucScreen> {
 
     try {
       final repository = ref.read(emotionRepositoryProvider);
-
       final data = await repository.detectTextEmotion(cleanText, limit: 9);
 
       if (!mounted) return;
 
       setState(() {
         _result = data;
-
-        // Quan trọng:
-        // Tắt loading ngay sau khi đã chẩn đoán xong cảm xúc.
-        // Không chờ player phát nhạc xong.
         _isAnalyzing = false;
       });
 
@@ -282,9 +275,6 @@ class _NhanDienCamXucScreenState extends ConsumerState<NhanDienCamXucScreen> {
       if (autoSong != null) {
         final queue = data.recommendedSongs.map((item) => item.track).toList();
 
-        // Quan trọng:
-        // Không await playTrack ở đây.
-        // Nếu await, nút "Phân tích cảm xúc" sẽ loading tới khi nhạc pause/stop.
         unawaited(
           ref
               .read(musicPlayerProvider.notifier)
@@ -366,6 +356,7 @@ class _NhanDienCamXucScreenState extends ConsumerState<NhanDienCamXucScreen> {
                   }
 
                   return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _InputSection(
                         controller: _textController,
@@ -428,127 +419,194 @@ class _HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            _emotionColor(emotion).withOpacity(0.22),
-            const Color(0xff070b12),
-            const Color(0xff0891b2).withOpacity(0.10),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 46,
-            offset: const Offset(0, 18),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -40,
-            top: -40,
-            child: _BlurCircle(
-              color: _emotionColor(emotion).withOpacity(0.28),
-              size: 180,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 760;
+
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(isMobile ? 18 : 22),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(color: Colors.white.withOpacity(0.10)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                _emotionColor(emotion).withOpacity(0.22),
+                const Color(0xff070b12),
+                const Color(0xff0891b2).withOpacity(0.10),
+              ],
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.25),
+                blurRadius: 46,
+                offset: const Offset(0, 18),
+              ),
+            ],
           ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          child: Stack(
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _SmallPill(
-                      icon: Icons.auto_awesome_rounded,
-                      label: 'Emotion AI / NLP tiếng Việt',
-                    ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Nhận diện cảm xúc từ văn bản',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 34,
-                        height: 1.05,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Nhập vài câu mô tả tâm trạng. Backend sẽ dự đoán cảm xúc, lọc bài hát theo mood trong database và tự động phát bài phù hợp nhất.',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.68),
-                        fontSize: 15,
-                        height: 1.55,
-                      ),
-                    ),
-                  ],
+              Positioned(
+                right: -45,
+                top: -45,
+                child: _BlurCircle(
+                  color: _emotionColor(emotion).withOpacity(0.28),
+                  size: isMobile ? 140 : 180,
                 ),
               ),
-              const SizedBox(width: 16),
-              Container(
-                width: 245,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.25),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: Colors.white.withOpacity(0.10)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              if (isMobile)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      hasResult ? 'Cảm xúc hiện tại' : 'Cảm xúc mặc định',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.56),
-                        fontSize: 13,
-                      ),
+                    _HeroTextBlock(isMobile: isMobile),
+                    const SizedBox(height: 18),
+                    _HeroEmotionCard(
+                      emotion: emotion,
+                      confidencePercent: confidencePercent,
+                      hasResult: hasResult,
+                      isMobile: isMobile,
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _EmotionBadge(emotion: emotion, large: true),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            emotion.labelVi,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
+                  ],
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      flex: 6,
+                      child: _HeroTextBlock(isMobile: isMobile),
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Độ tin cậy',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.56),
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$confidencePercent%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 34,
-                        fontWeight: FontWeight.w900,
+                    const SizedBox(width: 18),
+                    Expanded(
+                      flex: 4,
+                      child: _HeroEmotionCard(
+                        emotion: emotion,
+                        confidencePercent: confidencePercent,
+                        hasResult: hasResult,
+                        isMobile: isMobile,
                       ),
                     ),
                   ],
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HeroTextBlock extends StatelessWidget {
+  const _HeroTextBlock({required this.isMobile});
+
+  final bool isMobile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SmallPill(
+          icon: Icons.auto_awesome_rounded,
+          label: 'Emotion AI / NLP tiếng Việt',
+        ),
+        SizedBox(height: isMobile ? 16 : 18),
+        Text(
+          'Nhận diện cảm xúc từ văn bản',
+          softWrap: true,
+          maxLines: isMobile ? 3 : 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: isMobile ? 30 : 40,
+            height: 1.08,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Nhập vài câu mô tả tâm trạng. Backend sẽ dự đoán cảm xúc, lọc bài hát theo mood trong database và tự động phát bài phù hợp nhất.',
+          softWrap: true,
+          maxLines: isMobile ? 6 : 4,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.68),
+            fontSize: isMobile ? 13 : 15,
+            height: 1.55,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeroEmotionCard extends StatelessWidget {
+  const _HeroEmotionCard({
+    required this.emotion,
+    required this.confidencePercent,
+    required this.hasResult,
+    required this.isMobile,
+  });
+
+  final NlpEmotion emotion;
+  final int confidencePercent;
+  final bool hasResult;
+  final bool isMobile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(isMobile ? 16 : 18),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            hasResult ? 'Cảm xúc hiện tại' : 'Cảm xúc mặc định',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.56),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _EmotionBadge(emotion: emotion, large: true),
+              Text(
+                emotion.labelVi,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Độ tin cậy',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.56),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$confidencePercent%',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: isMobile ? 32 : 34,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ],
       ),
@@ -753,9 +811,11 @@ class _SpeechBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(26),
         border: Border.all(color: Colors.white.withOpacity(0.10)),
       ),
-      child: Column(
-        children: [
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 520;
+
+          final leading = Row(
             children: [
               AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
@@ -799,50 +859,71 @@ class _SpeechBox extends StatelessWidget {
                   ],
                 ),
               ),
-              OutlinedButton.icon(
-                onPressed: !speechSupported || isAnalyzing
-                    ? null
-                    : onToggleListening,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: isListening
-                      ? Colors.redAccent
-                      : const Color(0xffa5f3fc),
-                  side: BorderSide(
-                    color: isListening
-                        ? Colors.redAccent.withOpacity(0.34)
-                        : const Color(0xff22d3ee).withOpacity(0.34),
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                icon: Icon(
-                  isListening ? Icons.mic_off_rounded : Icons.mic_none_rounded,
-                  size: 18,
-                ),
-                label: Text(
-                  isListening ? 'Dừng ghi âm' : 'Bắt đầu ghi âm',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              speechStatus,
-              style: TextStyle(
+          );
+
+          final button = OutlinedButton.icon(
+            onPressed: !speechSupported || isAnalyzing
+                ? null
+                : onToggleListening,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: isListening
+                  ? Colors.redAccent
+                  : const Color(0xffa5f3fc),
+              side: BorderSide(
                 color: isListening
-                    ? const Color(0xffcffafe)
-                    : Colors.white.withOpacity(0.55),
-                fontSize: 13,
-                height: 1.45,
+                    ? Colors.redAccent.withOpacity(0.34)
+                    : const Color(0xff22d3ee).withOpacity(0.34),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
               ),
             ),
-          ),
-          if (isListening) ...[const SizedBox(height: 12), const _WaveBars()],
-        ],
+            icon: Icon(
+              isListening ? Icons.mic_off_rounded : Icons.mic_none_rounded,
+              size: 18,
+            ),
+            label: Text(
+              isListening ? 'Dừng ghi âm' : 'Bắt đầu ghi âm',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          );
+
+          return Column(
+            children: [
+              if (isMobile) ...[
+                leading,
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: button),
+              ] else
+                Row(
+                  children: [
+                    Expanded(child: leading),
+                    const SizedBox(width: 12),
+                    button,
+                  ],
+                ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  speechStatus,
+                  style: TextStyle(
+                    color: isListening
+                        ? const Color(0xffcffafe)
+                        : Colors.white.withOpacity(0.55),
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+              if (isListening) ...[
+                const SizedBox(height: 12),
+                const _WaveBars(),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -929,51 +1010,72 @@ class _RecommendationSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: _SectionTitle(
-                  icon: Icons.music_note_rounded,
-                  title: 'Bài hát đề xuất',
-                  subtitle:
-                      'Bài có điểm cao nhất sẽ được đưa vào player và phát tự động.',
-                  eyebrow: 'Recommendation',
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < 620;
+
+              final title = const _SectionTitle(
+                icon: Icons.music_note_rounded,
+                title: 'Bài hát đề xuất',
+                subtitle:
+                    'Bài có điểm cao nhất sẽ được đưa vào player và phát tự động.',
+                eyebrow: 'Recommendation',
+              );
+
+              if (topSong == null) return title;
+
+              final badge = Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 9,
                 ),
-              ),
-              if (topSong != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 9,
+                decoration: BoxDecoration(
+                  color: const Color(0xff34d399).withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: const Color(0xff34d399).withOpacity(0.28),
                   ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xff34d399).withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: const Color(0xff34d399).withOpacity(0.28),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.play_arrow_rounded,
+                      color: Color(0xff34d399),
+                      size: 18,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.play_arrow_rounded,
-                        color: const Color(0xff34d399),
-                        size: 18,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
                         'Auto-play: ${topSong.track.title}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: const Color(0xff34d399),
+                          color: Color(0xff34d399),
                           fontWeight: FontWeight.w800,
                           fontSize: 12,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-            ],
+              );
+
+              if (isMobile) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [title, const SizedBox(height: 12), badge],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: title),
+                  const SizedBox(width: 12),
+                  Flexible(child: badge),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 18),
           if (songs.isEmpty)
@@ -1262,9 +1364,11 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isTight = constraints.maxWidth < 360;
+
+        final leading = Container(
           width: 46,
           height: 46,
           decoration: BoxDecoration(
@@ -1272,9 +1376,9 @@ class _SectionTitle extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
           ),
           child: Icon(icon, color: const Color(0xffa5f3fc)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
+        );
+
+        final text = Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1292,6 +1396,8 @@ class _SectionTitle extends StatelessWidget {
               ],
               Text(
                 title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 19,
@@ -1301,16 +1407,31 @@ class _SectionTitle extends StatelessWidget {
               const SizedBox(height: 3),
               Text(
                 subtitle,
+                maxLines: isTight ? 3 : 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.56),
                   fontSize: 13,
+                  height: 1.35,
                 ),
               ),
             ],
           ),
-        ),
-        if (trailing != null) trailing!,
-      ],
+        );
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            leading,
+            const SizedBox(width: 12),
+            text,
+            if (trailing != null && !isTight) ...[
+              const SizedBox(width: 10),
+              trailing!,
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -1324,6 +1445,7 @@ class _SmallPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(maxWidth: double.infinity),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
@@ -1335,12 +1457,16 @@ class _SmallPill extends StatelessWidget {
         children: [
           Icon(icon, color: Colors.white.withOpacity(0.84), size: 17),
           const SizedBox(width: 7),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.78),
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.78),
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
             ),
           ),
         ],

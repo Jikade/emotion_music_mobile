@@ -7,25 +7,101 @@ import '../../../shared/widgets/song_grid.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../payments/presentation/vip_pro_payment_sheet.dart';
 
-class BangDieuKhienScreen extends StatelessWidget {
+class BangDieuKhienScreen extends StatefulWidget {
   const BangDieuKhienScreen({super.key});
 
   @override
+  State<BangDieuKhienScreen> createState() => _BangDieuKhienScreenState();
+}
+
+class _BangDieuKhienScreenState extends State<BangDieuKhienScreen> {
+  final ScrollController _scrollController = ScrollController();
+
+  bool _showScrollTopButton = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+
+    final shouldShow = _scrollController.offset > 260;
+
+    if (shouldShow == _showScrollTopButton) return;
+
+    setState(() {
+      _showScrollTopButton = shouldShow;
+    });
+  }
+
+  Future<void> _scrollToTop() async {
+    if (!_scrollController.hasClients) return;
+
+    await _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(18, 18, 18, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DashboardHeader(),
-          SizedBox(height: 18),
-          Expanded(
-            child: SongGrid(
-              emptyMessage: 'Không có bài hát nào phù hợp với bộ lọc hiện tại.',
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: NestedScrollView(
+            controller: _scrollController,
+            floatHeaderSlivers: false,
+            headerSliverBuilder: (context, innerBoxIsScrolled) {
+              return const [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(18, 18, 18, 0),
+                    child: _DashboardHeader(),
+                  ),
+                ),
+                SliverToBoxAdapter(child: SizedBox(height: 18)),
+              ];
+            },
+            body: const Padding(
+              padding: EdgeInsets.fromLTRB(18, 0, 18, 0),
+              child: SongGrid(
+                emptyMessage:
+                    'Không có bài hát nào phù hợp với bộ lọc hiện tại.',
+              ),
             ),
           ),
-        ],
-      ),
+        ),
+        Positioned(
+          right: 18,
+          bottom: 96,
+          child: IgnorePointer(
+            ignoring: !_showScrollTopButton,
+            child: AnimatedOpacity(
+              opacity: _showScrollTopButton ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: AnimatedSlide(
+                offset: _showScrollTopButton
+                    ? Offset.zero
+                    : const Offset(0, 0.3),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: _ScrollTopButton(onTap: _scrollToTop),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -39,18 +115,18 @@ class _DashboardHeader extends StatelessWidget {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 820;
 
-        const title = PageHeader(
-          eyebrow: 'Bảng điều khiển',
-          title: 'Không gian nghe của cậu',
-          description:
-              'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
-        );
-
         if (isWide) {
           return const Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: title),
+              Expanded(
+                child: PageHeader(
+                  eyebrow: 'Bảng điều khiển',
+                  title: 'Không gian nghe của cậu',
+                  description:
+                      'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
+                ),
+              ),
               SizedBox(width: 16),
               _HeaderActions(),
             ],
@@ -59,7 +135,16 @@ class _DashboardHeader extends StatelessWidget {
 
         return const Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [title, SizedBox(height: 14), _HeaderActions()],
+          children: [
+            PageHeader(
+              eyebrow: 'Bảng điều khiển',
+              title: 'Không gian nghe của cậu',
+              description:
+                  'Dùng thanh lọc bên trên để tìm bài hát, lọc theo mood hoặc chỉ xem các bài đã like.',
+            ),
+            SizedBox(height: 14),
+            Align(alignment: Alignment.centerRight, child: _HeaderActions()),
+          ],
         );
       },
     );
@@ -71,48 +156,25 @@ class _HeaderActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isNarrow = constraints.maxWidth < 430;
-
-        if (isNarrow) {
-          return const Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _VipProHeaderButton(expanded: true),
-              SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerRight,
-                child: _HeaderAuthButton(),
-              ),
-            ],
-          );
-        }
-
-        return const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _VipProHeaderButton(),
-            SizedBox(width: 10),
-            _HeaderAuthButton(),
-          ],
-        );
-      },
+    return const Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [_VipProHeaderButton(), _HeaderAuthButton()],
     );
   }
 }
 
 class _VipProHeaderButton extends ConsumerWidget {
-  const _VipProHeaderButton({this.expanded = false});
-
-  final bool expanded;
+  const _VipProHeaderButton();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authControllerProvider);
     final isVip = authState.user?.isVip == true;
 
-    final child = InkWell(
+    return InkWell(
       borderRadius: BorderRadius.circular(24),
       onTap: () {
         showVipProPaymentSheet(context);
@@ -148,10 +210,7 @@ class _VipProHeaderButton extends ConsumerWidget {
           ],
         ),
         child: Row(
-          mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
-          mainAxisAlignment: expanded
-              ? MainAxisAlignment.center
-              : MainAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               isVip ? Icons.verified_rounded : Icons.workspace_premium_rounded,
@@ -159,30 +218,22 @@ class _VipProHeaderButton extends ConsumerWidget {
               size: 21,
             ),
             const SizedBox(width: 9),
-            Flexible(
-              child: Text(
-                isVip ? 'VIP PRO' : 'Nâng cấp VIP PRO',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: isVip
-                      ? const Color(0xffbbf7d0)
-                      : const Color(0xffffd166),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
-                ),
+            Text(
+              isVip ? 'VIP PRO' : 'Nâng cấp VIP PRO',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isVip
+                    ? const Color(0xffbbf7d0)
+                    : const Color(0xffffd166),
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
               ),
             ),
           ],
         ),
       ),
     );
-
-    if (expanded) {
-      return SizedBox(width: double.infinity, child: child);
-    }
-
-    return child;
   }
 }
 
@@ -235,7 +286,7 @@ class _HeaderAuthButton extends ConsumerWidget {
     final email = user.email.trim();
     final avatarLetter = displayName.trim().isEmpty
         ? 'U'
-        : displayName.trim().characters.first.toUpperCase();
+        : displayName.trim()[0].toUpperCase();
     final avatarUrl = user.avatarUrl?.trim();
 
     return _AuthShell(
@@ -429,6 +480,44 @@ class _AuthShell extends StatelessWidget {
         ],
       ),
       child: child,
+    );
+  }
+}
+
+class _ScrollTopButton extends StatelessWidget {
+  const _ScrollTopButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: const Color(0xff070b12).withOpacity(0.96),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withOpacity(0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.38),
+                blurRadius: 28,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.keyboard_arrow_up_rounded,
+            color: Colors.white,
+            size: 30,
+          ),
+        ),
+      ),
     );
   }
 }
