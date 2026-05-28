@@ -4,6 +4,11 @@ class AppConfig {
     defaultValue: 'http://localhost:8000',
   );
 
+  static const String mediaBaseUrl = String.fromEnvironment(
+    'MEDIA_BASE_URL',
+    defaultValue: apiBaseUrl,
+  );
+
   static const String googleClientId = String.fromEnvironment(
     'GOOGLE_CLIENT_ID',
     defaultValue:
